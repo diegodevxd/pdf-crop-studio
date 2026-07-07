@@ -24,12 +24,16 @@ STRINGS = {
     "open_folder": {"en": "Open output folder", "es": "Abrir carpeta de salida"},
     "delete_crop": {"en": "Delete selected crop", "es": "Borrar recorte seleccionado"},
     "export_sql": {"en": "Export to SQL", "es": "Exportar a SQL"},
-    "tip": {"en": ("Drag over the page to crop. With a list loaded, pick an item\n"
-                   "first to pre-fill its label. Ctrl+F searches; Enter jumps to\n"
-                   "that page. ✓ = done · · = pending."),
-            "es": ("Arrastra sobre la página para recortar. Con una lista cargada,\n"
-                   "elige un ítem antes para pre-llenar su etiqueta. Ctrl+F busca;\n"
-                   "Enter salta a esa página. ✓ = hecho · · = pendiente.")},
+    "mode_crop": {"en": "✂  Crop mode  (drag to select)",
+                  "es": "✂  Modo recorte  (arrastra para seleccionar)"},
+    "mode_pan": {"en": "✋  Pan mode  (drag to move)",
+                 "es": "✋  Modo mano  (arrastra para mover)"},
+    "tip": {"en": ("Drag to crop. Switch to Pan mode (or hold Space) to move the\n"
+                   "page. Wheel scrolls · Shift+wheel sideways · Ctrl+wheel zooms.\n"
+                   "Ctrl+F searches; Enter jumps to that page."),
+            "es": ("Arrastra para recortar. Cambia a Modo mano (o mantén Espacio)\n"
+                   "para mover. Rueda = scroll · Shift+rueda = lateral · Ctrl+rueda\n"
+                   "= zoom. Ctrl+F busca; Enter salta a esa página.")},
 
     # Counts
     "count_labels": {"en": "{0} done · {1} pending of {2}",

@@ -160,19 +160,30 @@ With a list loaded, pick an item in the sidebar before you drag — its label is
 pre-filled, and it's marked ✓ once you've cropped it. "Only pending" hides the
 ones you've already done.
 
-## Keyboard shortcuts
+## Mouse & keyboard
+
+Two mouse modes, toggled with the **Crop / Pan** button in the sidebar:
+
+- **Crop mode** (default): left-drag draws a crop rectangle.
+- **Pan mode**: left-drag moves the page around.
+
+In *either* mode you can also pan by **dragging with the middle mouse button**
+or by **holding `Space` and dragging** — handy for a quick nudge without
+leaving crop mode.
 
 | Shortcut            | Action                          |
 |---------------------|---------------------------------|
-| `Ctrl+O`            | Open a PDF                      |
-| `PageUp` / `PageDown` | Previous / next page          |
-| `Ctrl` + `+` / `-`  | Zoom in / out                   |
-| Mouse wheel         | Zoom at cursor                  |
-| `Shift` + wheel     | Scroll horizontally             |
-| `Ctrl+F`            | Focus search                    |
+| `Ctrl+O`            | Open a PDF                       |
+| `PageUp` / `PageDown` | Previous / next page           |
+| Mouse wheel         | Scroll up / down                 |
+| `Shift` + wheel     | Scroll left / right              |
+| `Ctrl` + wheel      | Zoom at cursor                   |
+| `Ctrl` + `+` / `-`  | Zoom in / out                    |
+| Middle-drag / `Space`+drag | Pan the page              |
+| `Ctrl+F`            | Focus search                     |
 | `Enter` (in search) | Jump to the highlighted item's page |
-| `Delete` (in list)  | Delete the selected crop        |
-| `Esc`               | Cancel the current selection    |
+| `Delete` (in list)  | Delete the selected crop         |
+| `Esc`               | Cancel the current selection     |
 
 ## Roadmap
 

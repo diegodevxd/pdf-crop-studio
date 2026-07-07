@@ -67,6 +67,10 @@ class ExtractorApp:
         self.cur_cx = self.cur_cy = None
         self.rect_item = self.dim_item = self.dim_bg_item = None
 
+        self.mouse_mode = "crop"   # "crop" (drag selects) or "pan" (drag moves)
+        self._space_pan = False    # holding Space temporarily pans
+        self._panning = False
+
         self.pending_id = None
         self.pending_label = None
         self.list_rows = []  # parallel to listbox entries
@@ -182,6 +186,12 @@ class ExtractorApp:
         self.zoom_lbl.pack(side="right", padx=6)
         self._btn(zoom_frame, "＋", lambda: self._zoom(1.25)).pack(side="right")
 
+        mode_frame = tk.Frame(side, bg=PANEL)
+        mode_frame.pack(fill="x", padx=18, pady=(0, 12))
+        self.mode_btn = self._btn(mode_frame, t("mode_crop"), self._toggle_mode)
+        self.mode_btn.pack(fill="x")
+        self._apply_mode()
+
         tk.Label(side, text=t("search"), bg=PANEL, fg=MUTED, font=FONT_SB).pack(
             anchor="w", padx=18, pady=(0, 2))
         search_frame = tk.Frame(side, bg=PANEL)
@@ -243,7 +253,8 @@ class ExtractorApp:
         wrap = tk.Frame(parent, bg=CANVAS_BG)
         wrap.pack(side="left", fill="both", expand=True)
 
-        self.canvas = tk.Canvas(wrap, bg=CANVAS_BG, bd=0, highlightthickness=0, cursor="cross")
+        self.canvas = tk.Canvas(wrap, bg=CANVAS_BG, bd=0, highlightthickness=0, cursor="cross",
+                                xscrollincrement=20, yscrollincrement=20)
         self.canvas.pack(side="left", fill="both", expand=True)
 
         xsb = tk.Scrollbar(wrap, orient="horizontal", bg=PANEL, troughcolor=PANEL, bd=0,
@@ -259,8 +270,14 @@ class ExtractorApp:
         self.canvas.bind("<ButtonPress-1>", self._on_press)
         self.canvas.bind("<B1-Motion>", self._on_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
+        # Middle-button drag always pans, in any mode.
+        self.canvas.bind("<ButtonPress-2>", self._on_pan_press)
+        self.canvas.bind("<B2-Motion>", self._on_pan_move)
+        self.canvas.bind("<ButtonRelease-2>", self._on_pan_release)
+        # Hold Space to pan temporarily (Photoshop-style).
+        self.canvas.bind("<KeyPress-space>", self._space_down)
+        self.canvas.bind("<KeyRelease-space>", self._space_up)
         self.canvas.bind("<MouseWheel>", self._on_wheel)
-        self.canvas.bind("<Shift-MouseWheel>", self._on_wheel_h)
         self.canvas.bind("<Configure>", lambda e: self._update_scroll())
 
     def _build_statusbar(self, parent):
@@ -466,7 +483,7 @@ class ExtractorApp:
             self.plist.insert("end", f"{icon} {rid}  {label}{suffix}" if rid else f"{icon} {label}{suffix}")
             self.plist.itemconfig("end", {"foreground": MUTED if is_done else TEXT})
             self.list_rows.append({"kind": "label", "id": rid, "label": label,
-                                   "category": row.get("category")})
+                                   "category": row.get("category"), "page": row.get("page")})
         self.count_lbl.config(text=t("count_labels").format(done, pending, len(self.labels)))
 
     def _populate_from_crops(self, q):
@@ -522,12 +539,10 @@ class ExtractorApp:
         row = self._current_row()
         if not row:
             return
-        pg = None
-        if row["kind"] == "crop":
-            pg = row.get("page")
-        elif self.project:
+        pg = row.get("page")
+        if not pg and row["kind"] == "label" and self.project:
             for r in self.project.crops.values():
-                if r.get("id") == row.get("id"):
+                if r.get("id") and r.get("id") == row.get("id"):
                     pg = r.get("page")
                     break
         if not pg:
@@ -631,14 +646,15 @@ class ExtractorApp:
         self._render()
 
     def _on_wheel(self, e):
-        if e.state & 0x4:
-            self._on_wheel_h(e)
+        if self.orig is None:
             return
-        self.zoom = min(self.zoom * 1.1, 8.0) if e.delta > 0 else max(self.zoom / 1.1, 0.05)
-        self._zoom_at(e.x, e.y)
-
-    def _on_wheel_h(self, e):
-        self.canvas.xview_scroll(int(-e.delta / 120), "units")
+        if e.state & 0x0004:            # Ctrl → zoom at cursor
+            self.zoom = min(self.zoom * 1.1, 8.0) if e.delta > 0 else max(self.zoom / 1.1, 0.05)
+            self._zoom_at(e.x, e.y)
+        elif e.state & 0x0001:          # Shift → scroll sideways
+            self.canvas.xview_scroll(int(-e.delta / 120) * 3, "units")
+        else:                           # plain wheel → scroll vertically
+            self.canvas.yview_scroll(int(-e.delta / 120) * 3, "units")
 
     def _zoom_at(self, cx, cy):
         if self.orig is None:
@@ -662,8 +678,49 @@ class ExtractorApp:
     # Drag-to-crop
     # ------------------------------------------------------------------
 
+    # ---- mouse mode + panning ----------------------------------------
+
+    def _toggle_mode(self):
+        self.mouse_mode = "pan" if self.mouse_mode == "crop" else "crop"
+        self._apply_mode()
+
+    def _apply_mode(self):
+        pan = self.mouse_mode == "pan"
+        self.mode_btn.config(text=t("mode_pan") if pan else t("mode_crop"))
+        self.canvas.config(cursor="fleur" if pan else "cross")
+
+    def _want_pan(self):
+        return self.mouse_mode == "pan" or self._space_pan
+
+    def _space_down(self, _=None):
+        if not self._space_pan:
+            self._space_pan = True
+            self.canvas.config(cursor="fleur")
+        return "break"
+
+    def _space_up(self, _=None):
+        self._space_pan = False
+        self.canvas.config(cursor="fleur" if self.mouse_mode == "pan" else "cross")
+
+    def _on_pan_press(self, e):
+        self._panning = True
+        self.canvas.scan_mark(e.x, e.y)
+
+    def _on_pan_move(self, e):
+        if self._panning:
+            self.canvas.scan_dragto(e.x, e.y, gain=1)
+
+    def _on_pan_release(self, _=None):
+        self._panning = False
+
+    # ---- drag to crop -------------------------------------------------
+
     def _on_press(self, e):
         if self.orig is None:
+            return
+        self.canvas.focus_set()  # so Space-to-pan and shortcuts reach the canvas
+        if self._want_pan():
+            self._on_pan_press(e)
             return
         self.start_cx = self.canvas.canvasx(e.x)
         self.start_cy = self.canvas.canvasy(e.y)
@@ -671,6 +728,9 @@ class ExtractorApp:
         self._draw_rect()
 
     def _on_drag(self, e):
+        if self._panning:
+            self._on_pan_move(e)
+            return
         if self.start_cx is None:
             return
         self.cur_cx = self.canvas.canvasx(e.x)
@@ -706,6 +766,9 @@ class ExtractorApp:
         self.rect_item = self.dim_item = self.dim_bg_item = None
 
     def _on_release(self, e):
+        if self._panning:
+            self._panning = False
+            return
         if self.start_cx is None or self.orig is None:
             return
         x0 = min(self.start_cx, self.cur_cx) / self.zoom
