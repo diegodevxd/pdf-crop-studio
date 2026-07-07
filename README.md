@@ -27,6 +27,9 @@ auto-fill from the page text → **Save**.*
   your selection. No CSV, no retyping.
 - 🎯 **Key info only** — toggle "Only items with a price" to keep real
   products/entries and drop greetings, headers and stray numbers.
+- 🔢 **Works with code-based catalogs** — for catalogs whose items have a
+  product code instead of a name (`126031`, `W2155`), the code becomes the
+  entry and is detected on crop; no name required.
 - 🔎 **OCR fallback (Windows)** — scanned or flattened PDFs with no text layer
   are read with the OCR built into Windows 10/11: whole pages during
   **Extract data**, and the exact crop region when you make a crop. Product
@@ -141,8 +144,10 @@ the OS (installed with `pip install winocr`, no cloud involved):
 - Common OCR digit mistakes in prices are fixed automatically
   (`$ I,839.OO` → `$1,839.00`).
 
-Heads-up: OCR quality depends on the source. Crisp digital PDFs read great;
-low-resolution scans may only be partially readable.
+Heads-up: OCR quality depends on the source resolution. Crisp digital PDFs
+(≈150 DPI+) read great; a low-resolution rip (e.g. a 72 DPI catalog saved as a
+flat image) can only be read partially — the app tells you when it detects one,
+and you fix the odd wrong digit by hand after cropping.
 
 ### Export to SQL
 

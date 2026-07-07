@@ -148,9 +148,12 @@ def _looks_like_junk(text, is_price):
 def build_label_list(page_text, require_price=False):
     """Flatten extracted text into a deduped label list for the sidebar.
 
-    ``require_price=True`` keeps only lines that have a price on the same row
-    (real products/items), dropping greetings, headers and other filler.
-    Otherwise it keeps any meaningful line, dropping only obvious junk.
+    Works for both name-based catalogs (``Nike Air Max``) and code-based ones
+    (``126031`` with no product name): a line that is a product code becomes an
+    entry whose label IS the code, so nothing gets dropped as "just a number".
+
+    ``require_price=True`` keeps only entries that have a price nearby (real
+    products), dropping greetings, headers and other filler.
     """
     seen = set()
     labels = []
@@ -159,19 +162,25 @@ def build_label_list(page_text, require_price=False):
         prices = [it for it in items if it["is_price"]]
         for item in items:
             text = item["text"]
-            # Drops junk AND bare price lines (a lone "$1,800" has no letters).
-            if _looks_like_junk(text, item["is_price"]):
+            cid = item.get("id")
+            if cid:
+                # A product code on its own line: the code is the identifier.
+                entry_id, label = cid, text
+            elif _looks_like_junk(text, item["is_price"]):
+                # Junk AND bare price lines (a lone "$1,800" has no letters).
                 continue
+            else:
+                entry_id, label = "", text
             price_near = item["price"] if item["is_price"] else _price_near(item, prices)
             if require_price and price_near is None:
                 continue
-            key = text.lower()
+            key = (entry_id + "|" + label.lower()) if entry_id else label.lower()
             if key in seen:
                 continue
             seen.add(key)
             labels.append({
-                "id": "",
-                "label": text,
+                "id": entry_id,
+                "label": label,
                 "category": None,
                 "page": page,
                 "price": price_near,
@@ -202,7 +211,9 @@ def suggest_from_items(items):
     price = next((it["price"] for it in items if it["is_price"]), None)
     cid = next((it.get("id") for it in items if it.get("id")), None)
     # Best name = longest non-price, non-code line (usually the title).
-    label = max(names, key=lambda it: len(it["text"]))["text"] if names else None
+    # If there's no name at all (code-based catalog), fall back to the code so
+    # the crop still gets a meaningful, non-empty label.
+    label = max(names, key=lambda it: len(it["text"]))["text"] if names else cid
     return {"label": label, "price": price, "id": cid,
             "candidates": [it["text"] for it in items]}
 

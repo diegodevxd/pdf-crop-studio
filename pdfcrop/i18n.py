@@ -59,6 +59,10 @@ STRINGS = {
                         "es": "{0} páginas sin capa de texto — leyéndolas con OCR… {1}/{0}"},
     "status_extracted_ocr": {"en": " ({0} pages read with OCR)",
                              "es": " ({0} páginas leídas con OCR)"},
+    "status_lowres": {"en": ("  ⚠ This PDF is low-resolution — OCR could only read part "
+                             "of it. Crop over the caption and fix any wrong digits by hand."),
+                      "es": ("  ⚠ Este PDF es de baja resolución — el OCR solo pudo leer parte. "
+                             "Recorta sobre el texto y corrige a mano los dígitos que fallen.")},
     "mb_no_text_t": {"en": "This PDF has no text layer", "es": "Este PDF no tiene capa de texto"},
     "mb_no_text_m": {"en": ("{0} of {1} pages contain no selectable text (scanned or "
                             "flattened design), so there is nothing to extract from them.\n\n"

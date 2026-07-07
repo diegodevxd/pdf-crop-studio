@@ -23,6 +23,7 @@ from .theme import (
 )
 
 RENDER_ZOOM = 3.0  # page render scale; higher = crisper crops, more memory
+OCR_ZOOM = 4.0     # render a bit higher when OCR'ing (Windows OCR degrades past ~4x)
 SETTINGS_PATH = os.path.join(os.path.expanduser("~"), ".pdf_crop_studio.json")
 
 
@@ -422,7 +423,7 @@ class ExtractorApp:
                 self.root.after(0, lambda i=i: self._set_status(
                     t("status_ocr_page").format(total, i)))
                 try:
-                    img = ocr_doc.render(p - 1) if ocr_doc else None
+                    img = ocr_doc.render(p - 1, zoom=OCR_ZOOM) if ocr_doc else None
                     results[p] = ocr.ocr_image(img, langs) if img else []
                 except Exception:
                     results[p] = []
@@ -436,13 +437,17 @@ class ExtractorApp:
         if doc is not self.doc:
             return  # the user opened another PDF while OCR was running
         ocr_pages = 0
+        ocr_items = 0
         for p, items in results.items():
+            self.page_text[p] = items  # keep even if empty, so we don't rescan
             if items:
-                self.page_text[p] = items
                 ocr_pages += 1
-        self._finish_extract(ocr_pages=ocr_pages)
+                ocr_items += len(items)
+        # Very few items per OCR'd page usually means a low-resolution scan.
+        low_res = ocr_pages > 0 and ocr_items / max(ocr_pages, 1) < 3
+        self._finish_extract(ocr_pages=ocr_pages, low_res=low_res)
 
-    def _finish_extract(self, ocr_pages=0):
+    def _finish_extract(self, ocr_pages=0, low_res=False):
         self.label_index = {}
         self._rebuild_labels()
         n_prices = sum(1 for v in self.page_text.values() for it in v if it["is_price"])
@@ -456,6 +461,8 @@ class ExtractorApp:
         status = t("status_extracted").format(len(self.labels), n_prices)
         if ocr_pages:
             status += t("status_extracted_ocr").format(ocr_pages)
+        if low_res:
+            status += t("status_lowres")
         self._set_status(status)
 
     def _rebuild_labels(self):
@@ -866,7 +873,11 @@ class ExtractorApp:
             self.sel_lbl.config(text="")
 
     def _ocr_crop_region(self, ix0, iy0, ix1, iy1):
-        """OCR the crop + a band below it (where captions/prices usually sit)."""
+        """OCR the crop + a band below it (where captions/prices usually sit).
+
+        Renders the region straight from the PDF at a higher zoom than the
+        on-screen image, so small caption text reads far better.
+        """
         if not ocr.available() or self.orig is None:
             return suggest_from_items([])
         band = int((iy1 - iy0) * 0.6)
@@ -875,7 +886,12 @@ class ExtractorApp:
         ry0 = max(0, iy0)
         rx1 = min(self.img_w, ix1 + margin)
         ry1 = min(self.img_h, iy1 + band)
-        region = self.orig.crop((rx0, ry0, rx1, ry1))
+        try:
+            hi = self.doc.render(self.current_idx, zoom=OCR_ZOOM)
+            s = OCR_ZOOM / RENDER_ZOOM
+            region = hi.crop((int(rx0 * s), int(ry0 * s), int(rx1 * s), int(ry1 * s)))
+        except Exception:
+            region = self.orig.crop((rx0, ry0, rx1, ry1))
         langs = (get_lang(), "en" if get_lang() == "es" else "es")
         return suggest_from_items(ocr.ocr_image(region, langs))
 
