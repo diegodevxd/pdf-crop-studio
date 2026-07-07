@@ -17,6 +17,7 @@ pip install pyinstaller
 ```bash
 pyinstaller --onefile --windowed --name "PDF Crop Studio" ^
     --collect-all fitz ^
+    --collect-all winocr --collect-submodules winrt ^
     run.py
 ```
 
@@ -25,8 +26,11 @@ Notes:
 - `--windowed` hides the console window (it's a GUI app).
 - `--collect-all fitz` bundles the PyMuPDF binaries; without it the `.exe` may
   fail to open PDFs on a machine that doesn't have the DLLs.
-- On macOS/Linux use `--collect-all fitz` too, and drop the `^` line-continuation
-  (use `\` on bash).
+- `--collect-all winocr --collect-submodules winrt` bundles the Windows OCR
+  bridge so scanned PDFs work in the packaged app. If you build without
+  installing `winocr`, drop those two flags — the app runs fine without OCR.
+- On macOS/Linux use only `--collect-all fitz`, and drop the `^`
+  line-continuations (use `\` on bash). OCR is Windows-only.
 
 The finished executable is at `dist/PDF Crop Studio.exe`.
 
