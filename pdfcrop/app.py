@@ -9,8 +9,10 @@ from PIL import Image, ImageTk
 
 from .dialog import CropDialog
 from .extract import build_label_list, extract_page_text, find_label_for_crop
+from .i18n import LANGUAGES, get_lang, set_lang, t
 from .labels import load_labels
 from .pdfdoc import PdfDocument
+from .sqlexport import export_sql
 from .store import Project
 from .theme import (
     ACCENT, ACCENT2, BG, BORDER, CANVAS_BG, DANGER, FONT, FONT_H, FONT_MONO,
@@ -18,6 +20,7 @@ from .theme import (
 )
 
 RENDER_ZOOM = 3.0  # page render scale; higher = crisper crops, more memory
+SETTINGS_PATH = os.path.join(os.path.expanduser("~"), ".pdf_crop_studio.json")
 
 
 def natural_sort_key(name):
@@ -25,9 +28,28 @@ def natural_sort_key(name):
     return int(nums[0]) if nums else 0
 
 
+def _load_settings():
+    try:
+        with open(SETTINGS_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_settings(data):
+    try:
+        with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except OSError:
+        pass
+
+
 class ExtractorApp:
     def __init__(self, root, pdf_path=None):
         self.root = root
+
+        self.settings = _load_settings()
+        set_lang(self.settings.get("lang", "en"))
 
         self.doc = None
         self.project = None
@@ -50,7 +72,9 @@ class ExtractorApp:
         self.list_rows = []  # parallel to listbox entries
 
         self.filter_pending_only = tk.BooleanVar(value=False)
+        self.only_with_price = tk.BooleanVar(value=False)
         self.search_var = tk.StringVar()
+        self.search_var.trace_add("write", lambda *_: self._refresh_list())
 
         self._build_ui()
 
@@ -84,11 +108,13 @@ class ExtractorApp:
         self.root.geometry("1320x860")
         self.root.minsize(1000, 640)
 
-        main = tk.Frame(self.root, bg=BG)
-        main.pack(fill="both", expand=True)
+        self.main = tk.Frame(self.root, bg=BG)
+        self.main.pack(fill="both", expand=True)
 
-        self._build_sidebar(main)
-        self._build_canvas_area(main)
+        self._build_canvas_area(self.main)
+        self.side = None
+        self.statusbar = None
+        self._build_sidebar(self.main)
         self._build_statusbar(self.root)
 
         self.root.bind("<Prior>", lambda e: self.goto_page(self.current_idx - 1))
@@ -104,52 +130,59 @@ class ExtractorApp:
         side = tk.Frame(parent, bg=PANEL, width=330, bd=0, highlightthickness=0)
         side.pack(side="right", fill="y")
         side.pack_propagate(False)
+        self.side = side
 
         header = tk.Frame(side, bg=PANEL)
         header.pack(fill="x", padx=18, pady=(18, 10))
-        tk.Label(header, text="PDF Crop Studio", bg=PANEL, fg=ACCENT,
-                 font=FONT_TITLE).pack(anchor="w")
-        tk.Label(header, text="Crop images out of any PDF by hand", bg=PANEL, fg=MUTED,
-                 font=FONT_SB).pack(anchor="w")
+        titlerow = tk.Frame(header, bg=PANEL)
+        titlerow.pack(fill="x")
+        tk.Label(titlerow, text="PDF Crop Studio", bg=PANEL, fg=ACCENT,
+                 font=FONT_TITLE).pack(side="left")
+        lang_box = tk.Frame(titlerow, bg=PANEL)
+        lang_box.pack(side="right")
+        for code in LANGUAGES:
+            active = get_lang() == code
+            b = tk.Button(lang_box, text=code.upper(), command=lambda c=code: self._set_language(c),
+                          bg=ACCENT if active else PANEL2, fg=CANVAS_BG if active else MUTED,
+                          font=FONT_SB, relief="flat", bd=0, padx=7, pady=2, cursor="hand2",
+                          activebackground=ACCENT2)
+            b.pack(side="left", padx=(4, 0))
+        tk.Label(header, text=t("subtitle"), bg=PANEL, fg=MUTED, font=FONT_SB).pack(anchor="w")
 
         openrow = tk.Frame(side, bg=PANEL)
         openrow.pack(fill="x", padx=18, pady=(0, 8))
-        self._btn(openrow, "Open PDF  (Ctrl+O)", self._pick_pdf, primary=True).pack(
-            fill="x", pady=(0, 6))
-        self._btn(openrow, "Extract data (text + prices)", self._extract_data).pack(
-            fill="x", pady=(0, 6))
-        self._btn(openrow, "Load label list (CSV)", self._pick_csv).pack(fill="x")
+        self._btn(openrow, t("open_pdf"), self._pick_pdf, primary=True).pack(fill="x", pady=(0, 6))
+        self._btn(openrow, t("extract"), self._extract_data).pack(fill="x", pady=(0, 6))
+        self._btn(openrow, t("load_csv"), self._pick_csv).pack(fill="x")
 
         nav = tk.Frame(side, bg=PANEL)
         nav.pack(fill="x", padx=18, pady=(6, 6))
         self._btn(nav, "«", lambda: self.goto_page(0)).pack(side="left")
-        self._btn(nav, "‹", lambda: self.goto_page(self.current_idx - 1)).pack(
-            side="left", padx=(6, 0))
+        self._btn(nav, "‹", lambda: self.goto_page(self.current_idx - 1)).pack(side="left", padx=(6, 0))
         self.page_lbl = tk.Label(nav, text="—", bg=PANEL, fg=TEXT, font=FONT, width=12)
         self.page_lbl.pack(side="left", fill="x", expand=True)
         self._btn(nav, "›", lambda: self.goto_page(self.current_idx + 1)).pack(side="right")
-        self._btn(nav, "»", lambda: self.goto_page(self._page_count() - 1)).pack(
-            side="right", padx=(0, 6))
+        self._btn(nav, "»", lambda: self.goto_page(self._page_count() - 1)).pack(side="right", padx=(0, 6))
 
         pgframe = tk.Frame(side, bg=PANEL)
         pgframe.pack(fill="x", padx=18, pady=(0, 12))
-        tk.Label(pgframe, text="Go to page:", bg=PANEL, fg=MUTED, font=FONT_SB).pack(side="left")
+        tk.Label(pgframe, text=t("goto"), bg=PANEL, fg=MUTED, font=FONT_SB).pack(side="left")
         self.goto_entry = tk.Entry(pgframe, width=5, font=FONT_MONO, bg=PANEL2, fg=TEXT,
                                    insertbackground=TEXT, relief="flat", highlightthickness=1,
                                    highlightbackground=BORDER, justify="center")
         self.goto_entry.pack(side="left", padx=6)
         self.goto_entry.bind("<Return>", self._goto_entry)
-        self._btn(pgframe, "Go", self._goto_entry).pack(side="left", padx=4)
+        self._btn(pgframe, t("go"), self._goto_entry).pack(side="left", padx=4)
 
         zoom_frame = tk.Frame(side, bg=PANEL)
         zoom_frame.pack(fill="x", padx=18, pady=(0, 14))
-        tk.Label(zoom_frame, text="Zoom", bg=PANEL, fg=MUTED, font=FONT_SB).pack(side="left")
+        tk.Label(zoom_frame, text=t("zoom"), bg=PANEL, fg=MUTED, font=FONT_SB).pack(side="left")
         self._btn(zoom_frame, "－", lambda: self._zoom(0.8)).pack(side="right")
         self.zoom_lbl = tk.Label(zoom_frame, text="100%", bg=PANEL, fg=TEXT, font=FONT, width=8)
         self.zoom_lbl.pack(side="right", padx=6)
         self._btn(zoom_frame, "＋", lambda: self._zoom(1.25)).pack(side="right")
 
-        tk.Label(side, text="Search (Ctrl+F)", bg=PANEL, fg=MUTED, font=FONT_SB).pack(
+        tk.Label(side, text=t("search"), bg=PANEL, fg=MUTED, font=FONT_SB).pack(
             anchor="w", padx=18, pady=(0, 2))
         search_frame = tk.Frame(side, bg=PANEL)
         search_frame.pack(fill="x", padx=18, pady=(0, 6))
@@ -157,7 +190,6 @@ class ExtractorApp:
                                      bg=PANEL2, fg=TEXT, insertbackground=TEXT, relief="flat",
                                      highlightthickness=1, highlightbackground=ACCENT)
         self.search_entry.pack(fill="x", side="left", expand=True, ipady=3)
-        self.search_var.trace_add("write", lambda *_: self._refresh_list())
         self.search_entry.bind("<Return>", self._jump_to_row_page)
         self.search_entry.bind("<Down>", lambda e: (self._move_selection(1), "break")[1])
         self.search_entry.bind("<Up>", lambda e: (self._move_selection(-1), "break")[1])
@@ -165,10 +197,14 @@ class ExtractorApp:
 
         filt = tk.Frame(side, bg=PANEL)
         filt.pack(fill="x", padx=18, pady=(0, 2))
-        tk.Checkbutton(filt, text="Only pending", variable=self.filter_pending_only, bg=PANEL,
+        tk.Checkbutton(filt, text=t("only_pending"), variable=self.filter_pending_only, bg=PANEL,
                        fg=MUTED, selectcolor=PANEL2, activebackground=PANEL,
                        activeforeground=TEXT, font=FONT_SB, bd=0, command=self._refresh_list,
                        highlightthickness=0).pack(side="left")
+        tk.Checkbutton(filt, text=t("only_price"), variable=self.only_with_price, bg=PANEL,
+                       fg=MUTED, selectcolor=PANEL2, activebackground=PANEL,
+                       activeforeground=TEXT, font=FONT_SB, bd=0, command=self._rebuild_labels,
+                       highlightthickness=0).pack(side="left", padx=(10, 0))
 
         count_row = tk.Frame(side, bg=PANEL)
         count_row.pack(fill="x", padx=18, pady=(0, 8))
@@ -180,17 +216,14 @@ class ExtractorApp:
         # instead of covering them).
         bottom = tk.Frame(side, bg=PANEL)
         bottom.pack(side="bottom", fill="x", padx=18, pady=(8, 18))
-        self._btn(bottom, "Open output folder", self._open_output_folder).pack(fill="x")
-        self._btn(bottom, "Delete selected crop", self._delete_selected).pack(
-            fill="x", pady=(6, 0))
+        self._btn(bottom, t("export_sql"), self._export_sql, primary=True).pack(fill="x")
+        self._btn(bottom, t("open_folder"), self._open_output_folder).pack(fill="x", pady=(6, 0))
+        self._btn(bottom, t("delete_crop"), self._delete_selected).pack(fill="x", pady=(6, 0))
 
         self.preview_thumb = tk.Label(side, bg=PANEL, bd=0)
         self.preview_thumb.pack(side="bottom", fill="x", padx=18, pady=(0, 12))
 
-        tk.Label(side, text="Drag over the page to crop. With a CSV loaded, pick an\n"
-                            "item first to pre-fill its label. Ctrl+F searches; Enter\n"
-                            "jumps to that page. ✓ = done · · = pending.",
-                 bg=PANEL, fg=MUTED, font=FONT_SB, justify="left").pack(
+        tk.Label(side, text=t("tip"), bg=PANEL, fg=MUTED, font=FONT_SB, justify="left").pack(
             side="bottom", fill="x", padx=18, pady=(0, 12))
 
         list_wrap = tk.Frame(side, bg=PANEL)
@@ -233,7 +266,8 @@ class ExtractorApp:
     def _build_statusbar(self, parent):
         bar = tk.Frame(parent, bg=PANEL2, height=26, bd=0)
         bar.pack(side="bottom", fill="x")
-        self.status_lbl = tk.Label(bar, text="Open a PDF to begin.", bg=PANEL2, fg=MUTED,
+        self.statusbar = bar
+        self.status_lbl = tk.Label(bar, text=t("status_open_begin"), bg=PANEL2, fg=MUTED,
                                    font=FONT_SB, anchor="w")
         self.status_lbl.pack(side="left", padx=12, pady=3)
         self.sel_lbl = tk.Label(bar, text="", bg=PANEL2, fg=ACCENT, font=FONT_SB)
@@ -243,12 +277,37 @@ class ExtractorApp:
         self.canvas.focus_set()
 
     # ------------------------------------------------------------------
+    # Language switching (rebuilds the sidebar + status bar in place)
+    # ------------------------------------------------------------------
+
+    def _set_language(self, lang):
+        if lang == get_lang():
+            return
+        set_lang(lang)
+        self.settings["lang"] = lang
+        _save_settings(self.settings)
+
+        if self.side is not None:
+            self.side.destroy()
+        if self.statusbar is not None:
+            self.statusbar.destroy()
+        self._build_sidebar(self.main)
+        self._build_statusbar(self.root)
+
+        self._refresh_list()
+        if self.doc:
+            n, total = self.current_idx + 1, self._page_count()
+            self.page_lbl.config(text=f" {n} / {total} ")
+            self.zoom_lbl.config(text=f"{int(self.zoom * 100)}%")
+            self._set_status(t("status_page").format(n, total))
+
+    # ------------------------------------------------------------------
     # Opening PDFs and label lists
     # ------------------------------------------------------------------
 
     def _pick_pdf(self, _=None):
         path = filedialog.askopenfilename(
-            title="Open a PDF", filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")])
+            title=t("open_pdf"), filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")])
         if path:
             self._open_pdf(path)
 
@@ -256,7 +315,7 @@ class ExtractorApp:
         try:
             doc = PdfDocument(path, render_zoom=RENDER_ZOOM)
         except Exception as e:
-            messagebox.showerror("Could not open PDF", str(e))
+            messagebox.showerror(t("mb_open_err"), str(e))
             return
         if self.doc:
             self.doc.close()
@@ -281,7 +340,7 @@ class ExtractorApp:
         cached = self._load_extracted_cache()
         if cached:
             self.page_text = cached
-            self.labels = build_label_list(cached)
+            self.labels = build_label_list(cached, require_price=self.only_with_price.get())
 
         self._refresh_list()
         self.load_image()
@@ -296,58 +355,75 @@ class ExtractorApp:
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
-            # JSON keys are strings; restore int page numbers.
             return {int(k): v for k, v in data.items()}
         except (OSError, ValueError):
             return None
 
     def _extract_data(self):
         if not self.doc:
-            messagebox.showinfo("No PDF open", "Open a PDF first, then extract its data.")
+            messagebox.showinfo(t("mb_no_pdf_t"), t("mb_no_pdf_m"))
             return
-        self._set_status("Extracting text from the PDF…")
+        self._set_status(t("status_extracting"))
         self.root.update_idletasks()
         try:
             self.page_text = extract_page_text(
                 self.doc,
-                progress_cb=lambda i, n: self._set_status(f"Extracting text… page {i}/{n}"),
+                progress_cb=lambda i, n: self._set_status(t("status_extracting_page").format(i, n)),
             )
         except Exception as e:
-            messagebox.showerror("Extraction failed", str(e))
+            messagebox.showerror(t("mb_extract_err"), str(e))
             return
 
-        self.labels = build_label_list(self.page_text)
         self.label_index = {}
-        n_lines = sum(len(v) for v in self.page_text.values())
+        self._rebuild_labels()
         n_prices = sum(1 for v in self.page_text.values() for it in v if it["is_price"])
 
-        # Cache so reopening this PDF doesn't rescan.
         try:
             with open(self._extracted_cache_path(), "w", encoding="utf-8") as f:
-                json.dump({str(k): v for k, v in self.page_text.items()}, f,
-                          ensure_ascii=False)
+                json.dump({str(k): v for k, v in self.page_text.items()}, f, ensure_ascii=False)
         except OSError:
             pass
 
+        self._set_status(t("status_extracted").format(len(self.labels), n_prices))
+
+    def _rebuild_labels(self):
+        """Rebuild the sidebar label list from the extracted text (respects the
+        'only with price' toggle). No-op if nothing was extracted."""
+        if self.page_text:
+            self.labels = build_label_list(self.page_text, require_price=self.only_with_price.get())
         self._refresh_list()
-        self._set_status(
-            f"Extracted {n_lines} text lines · {n_prices} look like prices. "
-            "Crops now auto-fill their label from nearby text.")
 
     def _pick_csv(self):
         path = filedialog.askopenfilename(
-            title="Load a label list (CSV)",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+            title=t("load_csv"), filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
         if not path:
             return
         try:
             self.labels = load_labels(path)
         except Exception as e:
-            messagebox.showerror("Could not read CSV", str(e))
+            messagebox.showerror(t("mb_csv_err"), str(e))
             return
         self.label_index = {row["id"]: row for row in self.labels if row["id"]}
-        self._set_status(f"Loaded {len(self.labels)} labels from {os.path.basename(path)}")
+        self._set_status(t("status_loaded_csv").format(len(self.labels), os.path.basename(path)))
         self._refresh_list()
+
+    def _export_sql(self):
+        if not self.project or not self.project.crops:
+            messagebox.showinfo(t("mb_export_none_t"), t("mb_export_none_m"))
+            return
+        stem = os.path.splitext(os.path.basename(self.project.source_pdf or "crops"))[0]
+        path = filedialog.asksaveasfilename(
+            title=t("export_sql"), defaultextension=".sql",
+            initialdir=self.project.output_dir, initialfile=f"{stem}.sql",
+            filetypes=[("SQL files", "*.sql"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            n = export_sql(self.project.crops, path)
+        except OSError as e:
+            messagebox.showerror(t("mb_export_err"), str(e))
+            return
+        messagebox.showinfo(t("mb_export_ok_t"), t("mb_export_ok_m").format(n, path))
 
     def _page_count(self):
         return self.doc.page_count if self.doc else 0
@@ -377,7 +453,7 @@ class ExtractorApp:
         done = pending = 0
         for row in self.labels:
             rid, label = row["id"], row["label"]
-            is_done = rid in done_ids
+            is_done = bool(rid) and rid in done_ids
             done += is_done
             pending += not is_done
             if is_done and self.filter_pending_only.get():
@@ -385,11 +461,13 @@ class ExtractorApp:
             if q and q not in (rid or "").lower() and q not in (label or "").lower():
                 continue
             icon = "✓" if is_done else "·"
-            self.plist.insert("end", f"{icon} {rid}  {label}")
+            price = row.get("price")
+            suffix = f"   {price}" if price is not None else ""
+            self.plist.insert("end", f"{icon} {rid}  {label}{suffix}" if rid else f"{icon} {label}{suffix}")
             self.plist.itemconfig("end", {"foreground": MUTED if is_done else TEXT})
             self.list_rows.append({"kind": "label", "id": rid, "label": label,
                                    "category": row.get("category")})
-        self.count_lbl.config(text=f"{done} done · {pending} pending of {len(self.labels)}")
+        self.count_lbl.config(text=t("count_labels").format(done, pending, len(self.labels)))
 
     def _populate_from_crops(self, q):
         crops = sorted(self.project.crops.values(), key=lambda r: (r.get("page") or 0, r["key"])) if self.project else []
@@ -404,7 +482,10 @@ class ExtractorApp:
                                    "page": r.get("page")})
             shown += 1
         total = len(crops)
-        self.count_lbl.config(text=f"{total} crops saved" + (f" · {shown} shown" if q else ""))
+        text = t("count_crops").format(total)
+        if q:
+            text += t("count_shown").format(shown)
+        self.count_lbl.config(text=text)
 
     def _current_row(self):
         sel = self.plist.curselection()
@@ -419,7 +500,7 @@ class ExtractorApp:
         if row["kind"] == "label":
             self.pending_id = row["id"]
             self.pending_label = row["label"]
-            self.sel_lbl.config(text=f"Next crop: {row['id']} — {row['label']}")
+            self.sel_lbl.config(text=t("sel_next").format(row["id"] or "—", row["label"]))
             if move_focus_to_canvas:
                 self.canvas.focus_set()
         else:
@@ -450,7 +531,7 @@ class ExtractorApp:
                     pg = r.get("page")
                     break
         if not pg:
-            self._set_status("No page recorded for this item yet.")
+            self._set_status(t("status_no_page"))
             return
         self.goto_page(pg - 1)
 
@@ -465,15 +546,15 @@ class ExtractorApp:
                     key = r["key"]
                     break
         if not key:
-            self._set_status("Nothing to delete for this item.")
+            self._set_status(t("status_nothing_delete"))
             return
         label = self.project.crops.get(key, {}).get("label", key)
-        if not messagebox.askyesno("Delete crop", f"Delete crop '{label}'? The PNG is removed too."):
+        if not messagebox.askyesno(t("mb_delete_t"), t("mb_delete_m").format(label)):
             return
         self.project.remove_crop(key)
         self.preview_thumb.config(image="", text="")
         self._refresh_list()
-        self._set_status(f"Deleted crop {label}.")
+        self._set_status(t("status_deleted").format(label))
 
     def _focus_search(self, _=None):
         self.search_entry.focus_set()
@@ -492,7 +573,7 @@ class ExtractorApp:
         self.canvas.delete("all")
         self.canvas.create_text(
             self.canvas.winfo_reqwidth() // 2 or 400, 300, fill=MUTED, font=FONT_H,
-            text="Open a PDF (Ctrl+O) to start cropping", anchor="center")
+            text=t("empty_canvas"), anchor="center")
 
     def load_image(self):
         if not self.doc:
@@ -500,14 +581,15 @@ class ExtractorApp:
         try:
             self.orig = self.doc.render(self.current_idx)
         except Exception as e:
-            messagebox.showerror("Render error", f"Could not render page {self.current_idx + 1}\n{e}")
+            messagebox.showerror(t("mb_render_err"),
+                                 t("mb_render_page").format(self.current_idx + 1, e))
             return
         self.img_w, self.img_h = self.orig.size
         self._fit_zoom()
         self._render()
         n, total = self.current_idx + 1, self._page_count()
         self.page_lbl.config(text=f" {n} / {total} ")
-        self._set_status(f"Page {n} of {total}  ·  drag over the page to crop an image")
+        self._set_status(t("status_page").format(n, total))
 
     def _fit_zoom(self):
         self.canvas.update_idletasks()
@@ -539,7 +621,7 @@ class ExtractorApp:
         try:
             n = int(self.goto_entry.get())
         except ValueError:
-            self._set_status("Invalid page number")
+            self._set_status(t("status_invalid_page"))
             return
         self.goto_page(n - 1)
         self.goto_entry.delete(0, "end")
@@ -634,12 +716,11 @@ class ExtractorApp:
         ix1, iy1 = min(self.img_w, int(x1)), min(self.img_h, int(y1))
         self._cancel_sel()
         if ix1 - ix0 < 20 or iy1 - iy0 < 20:
-            self._set_status("Selection too small — ignored")
+            self._set_status(t("status_small"))
             return
         crop = self.orig.crop((ix0, iy0, ix1, iy1))
         page = self.current_idx + 1
 
-        # Auto-label from extracted text falling inside/below the crop.
         crop_norm = {
             "x0": ix0 / self.img_w, "y0": iy0 / self.img_h,
             "x1": ix1 / self.img_w, "y1": iy1 / self.img_h,
@@ -654,7 +735,7 @@ class ExtractorApp:
             key = dlg.result
             self._refresh_list()
             rec = self.project.crops[key]
-            self._set_status(f"Saved: {rec['label']}  ·  page {page}")
+            self._set_status(t("status_saved").format(rec["label"], page))
             self._show_thumb(key)
             self.pending_id = self.pending_label = None
             self.sel_lbl.config(text="")

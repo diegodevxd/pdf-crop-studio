@@ -82,17 +82,54 @@ def extract_page_text(doc, progress_cb=None):
     return result
 
 
-def build_label_list(page_text):
-    """Flatten extracted text into a deduped label list for the sidebar."""
+def _price_near(item, prices, band=0.06):
+    """Return a price value sitting on roughly the same row as ``item``."""
+    b = item["bbox_norm"]
+    cy = (b["y0"] + b["y1"]) / 2
+    best = None
+    best_dy = band
+    for p in prices:
+        pb = p["bbox_norm"]
+        pcy = (pb["y0"] + pb["y1"]) / 2
+        dy = abs(pcy - cy)
+        # Same visual row and horizontally not too far apart.
+        if dy <= best_dy and min(b["x1"], pb["x1"]) > max(b["x0"], pb["x0"]) - 0.2:
+            best = p["price"]
+            best_dy = dy
+    return best
+
+
+def _looks_like_junk(text, is_price):
+    """True for lines that are noise: too short, bare numbers, or symbol soup."""
+    if len(text) < MIN_LABEL_LEN:
+        return True
+    if not is_price and re.fullmatch(r"[\d.,\-\s]+", text):
+        return True
+    letters = sum(c.isalpha() for c in text)
+    if letters < 2:  # needs at least a couple of letters to be a real label
+        return True
+    return False
+
+
+def build_label_list(page_text, require_price=False):
+    """Flatten extracted text into a deduped label list for the sidebar.
+
+    ``require_price=True`` keeps only lines that have a price on the same row
+    (real products/items), dropping greetings, headers and other filler.
+    Otherwise it keeps any meaningful line, dropping only obvious junk.
+    """
     seen = set()
     labels = []
     for page in sorted(page_text):
-        for item in page_text[page]:
+        items = page_text[page]
+        prices = [it for it in items if it["is_price"]]
+        for item in items:
             text = item["text"]
-            # Drop noise: too short, or a bare number that isn't a price.
-            if len(text) < MIN_LABEL_LEN:
+            # Drops junk AND bare price lines (a lone "$1,800" has no letters).
+            if _looks_like_junk(text, item["is_price"]):
                 continue
-            if not item["is_price"] and re.fullmatch(r"[\d.,\-\s]+", text):
+            price_near = item["price"] if item["is_price"] else _price_near(item, prices)
+            if require_price and price_near is None:
                 continue
             key = text.lower()
             if key in seen:
@@ -103,7 +140,7 @@ def build_label_list(page_text):
                 "label": text,
                 "category": None,
                 "page": page,
-                "price": item["price"],
+                "price": price_near,
             })
     return labels
 

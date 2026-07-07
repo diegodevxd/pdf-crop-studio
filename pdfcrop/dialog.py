@@ -5,6 +5,7 @@ from tkinter import messagebox
 
 from PIL import ImageTk
 
+from .i18n import t
 from .theme import (
     ACCENT, ACCENT2, BORDER, CANVAS_BG, DANGER, FONT, FONT_H, FONT_MONO,
     FONT_SB, MUTED, PANEL, PANEL2, SUCCESS, TEXT,
@@ -23,16 +24,16 @@ class CropDialog(tk.Toplevel):
         self.suggested_price = suggested_price
         self.result = None
         self.configure(bg=PANEL)
-        self.title("Save crop")
+        self.title(t("dlg_title"))
         self.transient(master)
         self.grab_set()
         self.resizable(False, False)
 
         w, h = crop_img.size
 
-        tk.Label(self, text="Confirm this crop", bg=PANEL, fg=TEXT, font=FONT_H).grid(
+        tk.Label(self, text=t("dlg_confirm"), bg=PANEL, fg=TEXT, font=FONT_H).grid(
             row=0, column=0, columnspan=2, padx=20, pady=(16, 4), sticky="w")
-        tk.Label(self, text=f"Selection: {w} x {h} px  ·  page {page}", bg=PANEL,
+        tk.Label(self, text=t("dlg_selection").format(w, h, page), bg=PANEL,
                  fg=MUTED, font=FONT_SB).grid(row=1, column=0, columnspan=2, padx=20,
                                               pady=(0, 8), sticky="w")
 
@@ -58,7 +59,7 @@ class CropDialog(tk.Toplevel):
             entry.pack(fill="x", pady=(2, 8))
             return var, entry
 
-        self.id_var, id_entry = _field("ID (optional)")
+        self.id_var, id_entry = _field(t("f_id"))
         self.id_var.set(app.pending_id or "")
 
         self.match_status = tk.StringVar()
@@ -66,20 +67,20 @@ class CropDialog(tk.Toplevel):
                                   fg=SUCCESS, font=FONT_SB, wraplength=230, justify="left")
         self.match_lbl.pack(anchor="w", pady=(0, 8))
 
-        self.label_var, label_entry = _field("Label")
+        self.label_var, label_entry = _field(t("f_label"))
         self.label_var.set(app.pending_label or suggested_label or "")
-        self.price_var, _ = _field("Price (optional)")
+        self.price_var, _ = _field(t("f_price"))
         if suggested_price is not None:
             self.price_var.set(_fmt_price(suggested_price))
-        self.category_var, _ = _field("Category (optional)")
+        self.category_var, _ = _field(t("f_category"))
 
         btns = tk.Frame(self, bg=PANEL)
         btns.grid(row=9, column=0, columnspan=2, padx=20, pady=(8, 16), sticky="ew")
-        self.save_btn = tk.Button(btns, text="Save", command=self._save, bg=ACCENT,
+        self.save_btn = tk.Button(btns, text=t("save"), command=self._save, bg=ACCENT,
                                   fg=CANVAS_BG, font=FONT_H, relief="flat",
                                   activebackground=ACCENT2, cursor="hand2", width=12, bd=0)
         self.save_btn.pack(side="left", padx=(0, 8))
-        tk.Button(btns, text="Cancel", command=self.destroy, bg=PANEL2, fg=TEXT,
+        tk.Button(btns, text=t("cancel"), command=self.destroy, bg=PANEL2, fg=TEXT,
                   font=FONT, relief="flat", activebackground=PANEL, cursor="hand2",
                   width=10, bd=0, highlightthickness=1,
                   highlightbackground=BORDER).pack(side="left")
@@ -98,7 +99,7 @@ class CropDialog(tk.Toplevel):
         existing = self.app.project.crops.get(cid) if cid else None
 
         if existing:
-            self.match_status.set("⚠  A crop with this ID exists — it will be overwritten.")
+            self.match_status.set(t("dlg_exists"))
             self.match_lbl.config(fg=DANGER)
         elif match:
             self.match_status.set("✓  " + (match.get("label") or ""))
@@ -108,7 +109,7 @@ class CropDialog(tk.Toplevel):
             if not self.category_var.get() and match.get("category"):
                 self.category_var.set(match["category"])
         elif cid and self.app.label_index:
-            self.match_status.set("·  ID not in the loaded list")
+            self.match_status.set(t("dlg_not_in_list"))
             self.match_lbl.config(fg=MUTED)
         else:
             self.match_status.set("")
@@ -120,15 +121,13 @@ class CropDialog(tk.Toplevel):
         price_txt = self.price_var.get().strip()
 
         if not label:
-            messagebox.showerror("Missing label", "Enter a label for this crop.", parent=self)
+            messagebox.showerror(t("err_nolabel_t"), t("err_nolabel_m"), parent=self)
             return
         price = None
         if price_txt:
             price = _parse_price_field(price_txt)
             if price is None:
-                messagebox.showerror("Invalid price",
-                                     "Price must be a number, e.g. 199.90 (or leave it empty).",
-                                     parent=self)
+                messagebox.showerror(t("err_price_t"), t("err_price_m"), parent=self)
                 return
 
         key = self.app.project.next_key(preferred=cid or None)
@@ -146,7 +145,7 @@ class CropDialog(tk.Toplevel):
         try:
             self.crop_img.save(out)
         except OSError as e:
-            messagebox.showerror("Could not save image", str(e), parent=self)
+            messagebox.showerror(t("err_img_t"), str(e), parent=self)
             return
 
         record = {

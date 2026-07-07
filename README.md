@@ -25,6 +25,12 @@ auto-fill from the page text → **Save**.*
 - 🪄 **Auto-label from the PDF** — hit **Extract data** and every crop's label
   (and price, when detected) is pre-filled from the text inside or just below
   your selection. No CSV, no retyping.
+- 🎯 **Key info only** — toggle "Only items with a price" to keep real
+  products/entries and drop greetings, headers and stray numbers.
+- 🗄️ **Export to SQL** — one click writes a ready-to-load `.sql` (id, label,
+  price, category, page, image path) for all your crops.
+- 🌐 **English & Spanish** — switch the whole UI language from the top-right;
+  your choice is remembered.
 - 🏷️ **Label each crop** with an optional ID, price and category.
 - 📋 **Optional CSV list** — or load your own list of items (SKUs, figure
   numbers, names) to tag crops against and track what's still pending.
@@ -116,6 +122,27 @@ on, when you drag a crop:
 It works on any PDF with a real text layer (not a flat scan). The scan is cached
 next to your crops as `extracted.json`, so reopening the same PDF is instant. You
 can still edit any field before saving — nothing is forced.
+
+### Export to SQL
+
+When you're done, click **Export to SQL** to write a single `.sql` file with one
+row per crop:
+
+```sql
+CREATE TABLE IF NOT EXISTS products (
+  id TEXT, label TEXT, price REAL, category TEXT, page INTEGER, image TEXT
+);
+INSERT INTO products (id, label, price, category, page, image) VALUES
+  ('10432', 'Mesa Roll', 1800, NULL, 1, 'crops/10432.png');
+```
+
+The `image` column points at the PNG in the `crops/` folder next to the `.sql`,
+so the file loads straight into SQLite, Postgres or MySQL.
+
+### Language
+
+Switch the interface between **English** and **Español** with the `EN` / `ES`
+buttons in the top-right corner. Your choice is saved for next time.
 
 ### Using a CSV label list (optional)
 
