@@ -1,4 +1,5 @@
 """PDF Crop Studio — main Tkinter application."""
+import json
 import os
 import re
 import tkinter as tk
@@ -7,6 +8,7 @@ from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk
 
 from .dialog import CropDialog
+from .extract import build_label_list, extract_page_text, find_label_for_crop
 from .labels import load_labels
 from .pdfdoc import PdfDocument
 from .store import Project
@@ -31,6 +33,7 @@ class ExtractorApp:
         self.project = None
         self.labels = []
         self.label_index = {}  # id -> label entry
+        self.page_text = {}    # page(1-based) -> [positioned text items]
 
         self.current_idx = 0
         self.zoom = 1.0
@@ -112,6 +115,8 @@ class ExtractorApp:
         openrow = tk.Frame(side, bg=PANEL)
         openrow.pack(fill="x", padx=18, pady=(0, 8))
         self._btn(openrow, "Open PDF  (Ctrl+O)", self._pick_pdf, primary=True).pack(
+            fill="x", pady=(0, 6))
+        self._btn(openrow, "Extract data (text + prices)", self._extract_data).pack(
             fill="x", pady=(0, 6))
         self._btn(openrow, "Load label list (CSV)", self._pick_csv).pack(fill="x")
 
@@ -268,8 +273,66 @@ class ExtractorApp:
 
         self.current_idx = 0
         self.root.title(f"PDF Crop Studio — {os.path.basename(path)}")
+
+        # Reuse a previous "Extract data" scan for this PDF if we cached one.
+        self.page_text = {}
+        self.labels = []
+        self.label_index = {}
+        cached = self._load_extracted_cache()
+        if cached:
+            self.page_text = cached
+            self.labels = build_label_list(cached)
+
         self._refresh_list()
         self.load_image()
+
+    def _extracted_cache_path(self):
+        return os.path.join(self.project.output_dir, "extracted.json") if self.project else None
+
+    def _load_extracted_cache(self):
+        path = self._extracted_cache_path()
+        if not path or not os.path.exists(path):
+            return None
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            # JSON keys are strings; restore int page numbers.
+            return {int(k): v for k, v in data.items()}
+        except (OSError, ValueError):
+            return None
+
+    def _extract_data(self):
+        if not self.doc:
+            messagebox.showinfo("No PDF open", "Open a PDF first, then extract its data.")
+            return
+        self._set_status("Extracting text from the PDF…")
+        self.root.update_idletasks()
+        try:
+            self.page_text = extract_page_text(
+                self.doc,
+                progress_cb=lambda i, n: self._set_status(f"Extracting text… page {i}/{n}"),
+            )
+        except Exception as e:
+            messagebox.showerror("Extraction failed", str(e))
+            return
+
+        self.labels = build_label_list(self.page_text)
+        self.label_index = {}
+        n_lines = sum(len(v) for v in self.page_text.values())
+        n_prices = sum(1 for v in self.page_text.values() for it in v if it["is_price"])
+
+        # Cache so reopening this PDF doesn't rescan.
+        try:
+            with open(self._extracted_cache_path(), "w", encoding="utf-8") as f:
+                json.dump({str(k): v for k, v in self.page_text.items()}, f,
+                          ensure_ascii=False)
+        except OSError:
+            pass
+
+        self._refresh_list()
+        self._set_status(
+            f"Extracted {n_lines} text lines · {n_prices} look like prices. "
+            "Crops now auto-fill their label from nearby text.")
 
     def _pick_csv(self):
         path = filedialog.askopenfilename(
@@ -575,7 +638,17 @@ class ExtractorApp:
             return
         crop = self.orig.crop((ix0, iy0, ix1, iy1))
         page = self.current_idx + 1
-        dlg = CropDialog(self.root, crop, self, page, (ix0, iy0, ix1, iy1))
+
+        # Auto-label from extracted text falling inside/below the crop.
+        crop_norm = {
+            "x0": ix0 / self.img_w, "y0": iy0 / self.img_h,
+            "x1": ix1 / self.img_w, "y1": iy1 / self.img_h,
+        }
+        suggestion = find_label_for_crop(self.page_text.get(page, []), crop_norm)
+
+        dlg = CropDialog(self.root, crop, self, page, (ix0, iy0, ix1, iy1),
+                         suggested_label=suggestion["label"],
+                         suggested_price=suggestion["price"])
         self.root.wait_window(dlg)
         if dlg.result:
             key = dlg.result

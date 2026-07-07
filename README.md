@@ -22,9 +22,12 @@ you need clean image cutouts and the automatic tools keep failing you.
 - 📄 **Open any PDF** and flip through pages, rendered crisp at 3× zoom.
 - 🔍 **Zoom & pan** with the mouse wheel to line up the perfect selection.
 - 🖱️ **Drag to crop** — live pixel dimensions while you drag.
-- 🏷️ **Label each crop** with an optional ID and category.
-- 📋 **Optional CSV list** — load a list of items (SKUs, figure numbers, names)
-  to tag crops against and track what's still pending.
+- 🪄 **Auto-label from the PDF** — hit **Extract data** and every crop's label
+  (and price, when detected) is pre-filled from the text inside or just below
+  your selection. No CSV, no retyping.
+- 🏷️ **Label each crop** with an optional ID, price and category.
+- 📋 **Optional CSV list** — or load your own list of items (SKUs, figure
+  numbers, names) to tag crops against and track what's still pending.
 - 💾 **Exports PNGs + `manifest.json`** with page number and normalized
   bounding boxes, ready for any downstream pipeline.
 - ⏯️ **Resumable** — close it and pick up exactly where you left off.
@@ -53,10 +56,13 @@ to build a standalone Windows `.exe`.
 ## How it works
 
 1. **Open PDF** (or pass one on the command line).
-2. Navigate to a page; zoom in with the wheel until the image is comfortable.
-3. **Drag a rectangle** over the region you want. Release to confirm.
-4. Give it a **label** (and optionally an ID/category), hit **Save**.
-5. The crop is written to `<pdfname>_crops/crops/<key>.png` and recorded in
+2. *(Optional)* Click **Extract data** — the app reads the PDF's text layer so
+   crops can auto-fill their label and price from nearby text.
+3. Navigate to a page; zoom in with the wheel until the image is comfortable.
+4. **Drag a rectangle** over the region you want. Release to confirm.
+5. The **label** (and price) come pre-filled from the text under your selection —
+   just confirm or tweak, then hit **Save**.
+6. The crop is written to `<pdfname>_crops/crops/<key>.png` and recorded in
    `<pdfname>_crops/manifest.json`.
 
 ### Output
@@ -82,6 +88,7 @@ Each `manifest.json` entry looks like:
   "id": "10432",
   "label": "Stainless steel thermos 1L",
   "category": "Kitchen",
+  "price": 199.9,
   "page": 14,
   "bbox_norm": { "x0": 0.11, "y0": 0.32, "x1": 0.48, "y1": 0.71 },
   "bbox_px": { "x0": 594, "y0": 1728, "x1": 2592, "y1": 3834 },
@@ -94,6 +101,21 @@ Each `manifest.json` entry looks like:
 
 `bbox_norm` is resolution-independent (0–1), so you can re-crop the same region
 from a higher-res render later if you need to.
+
+### Auto-labelling from the PDF text (Extract data)
+
+Click **Extract data (text + prices)** after opening a PDF. The app scans the
+document's text layer, remembering where every line sits on the page. From then
+on, when you drag a crop:
+
+- the **label** is pre-filled with the text that falls inside your selection (or
+  the caption right below it, e.g. a product name under a photo);
+- if a nearby line looks like a **price** (`$`, `€`, `MXN`, …), it's parsed and
+  filled into the price field too.
+
+It works on any PDF with a real text layer (not a flat scan). The scan is cached
+next to your crops as `extracted.json`, so reopening the same PDF is instant. You
+can still edit any field before saving — nothing is forced.
 
 ### Using a CSV label list (optional)
 

@@ -12,12 +12,15 @@ from .theme import (
 
 
 class CropDialog(tk.Toplevel):
-    def __init__(self, master, crop_img, app, page, bbox_px):
+    def __init__(self, master, crop_img, app, page, bbox_px,
+                 suggested_label=None, suggested_price=None):
         super().__init__(master)
         self.app = app
         self.crop_img = crop_img
         self.page = page
         self.bbox_px = bbox_px  # (ix0, iy0, ix1, iy1) in original page pixels
+        self.suggested_label = suggested_label
+        self.suggested_price = suggested_price
         self.result = None
         self.configure(bg=PANEL)
         self.title("Save crop")
@@ -64,7 +67,10 @@ class CropDialog(tk.Toplevel):
         self.match_lbl.pack(anchor="w", pady=(0, 8))
 
         self.label_var, label_entry = _field("Label")
-        self.label_var.set(app.pending_label or "")
+        self.label_var.set(app.pending_label or suggested_label or "")
+        self.price_var, _ = _field("Price (optional)")
+        if suggested_price is not None:
+            self.price_var.set(_fmt_price(suggested_price))
         self.category_var, _ = _field("Category (optional)")
 
         btns = tk.Frame(self, bg=PANEL)
@@ -111,10 +117,19 @@ class CropDialog(tk.Toplevel):
         cid = self.id_var.get().strip()
         label = self.label_var.get().strip()
         category = self.category_var.get().strip()
+        price_txt = self.price_var.get().strip()
 
         if not label:
             messagebox.showerror("Missing label", "Enter a label for this crop.", parent=self)
             return
+        price = None
+        if price_txt:
+            price = _parse_price_field(price_txt)
+            if price is None:
+                messagebox.showerror("Invalid price",
+                                     "Price must be a number, e.g. 199.90 (or leave it empty).",
+                                     parent=self)
+                return
 
         key = self.app.project.next_key(preferred=cid or None)
         ix0, iy0, ix1, iy1 = self.bbox_px
@@ -139,6 +154,7 @@ class CropDialog(tk.Toplevel):
             "id": cid or None,
             "label": label,
             "category": category or None,
+            "price": price,
             "page": self.page,
             "bbox_norm": bbox_norm,
             "bbox_px": {"x0": ix0, "y0": iy0, "x1": ix1, "y1": iy1},
@@ -150,3 +166,19 @@ class CropDialog(tk.Toplevel):
         self.app.project.add_crop(key, record)
         self.result = key
         self.destroy()
+
+
+def _fmt_price(value):
+    """Show a price without a trailing .0 for whole numbers."""
+    if value == int(value):
+        return str(int(value))
+    return f"{value:.2f}"
+
+
+def _parse_price_field(text):
+    """Parse the price the user typed. Returns a float or None if invalid."""
+    cleaned = text.strip().lstrip("$€£¥ ").replace(",", "")
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
