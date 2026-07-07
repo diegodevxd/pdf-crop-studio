@@ -14,7 +14,7 @@ from .theme import (
 
 class CropDialog(tk.Toplevel):
     def __init__(self, master, crop_img, app, page, bbox_px,
-                 suggested_label=None, suggested_price=None):
+                 suggested_label=None, suggested_price=None, suggested_id=None):
         super().__init__(master)
         self.app = app
         self.crop_img = crop_img
@@ -22,6 +22,7 @@ class CropDialog(tk.Toplevel):
         self.bbox_px = bbox_px  # (ix0, iy0, ix1, iy1) in original page pixels
         self.suggested_label = suggested_label
         self.suggested_price = suggested_price
+        self.suggested_id = suggested_id
         self.result = None
         self.configure(bg=PANEL)
         self.title(t("dlg_title"))
@@ -60,7 +61,7 @@ class CropDialog(tk.Toplevel):
             return var, entry
 
         self.id_var, id_entry = _field(t("f_id"))
-        self.id_var.set(app.pending_id or "")
+        self.id_var.set(app.pending_id or suggested_id or "")
 
         self.match_status = tk.StringVar()
         self.match_lbl = tk.Label(form, textvariable=self.match_status, bg=PANEL,

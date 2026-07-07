@@ -55,6 +55,19 @@ STRINGS = {
                                 "Crops now auto-fill their label from nearby text."),
                          "es": ("Extraídos {0} datos clave · {1} parecen precios. "
                                 "Los recortes ahora autollenan su etiqueta con el texto cercano.")},
+    "status_ocr_page": {"en": "No text layer on {0} pages — reading them with OCR… {1}/{0}",
+                        "es": "{0} páginas sin capa de texto — leyéndolas con OCR… {1}/{0}"},
+    "status_extracted_ocr": {"en": " ({0} pages read with OCR)",
+                             "es": " ({0} páginas leídas con OCR)"},
+    "mb_no_text_t": {"en": "This PDF has no text layer", "es": "Este PDF no tiene capa de texto"},
+    "mb_no_text_m": {"en": ("{0} of {1} pages contain no selectable text (scanned or "
+                            "flattened design), so there is nothing to extract from them.\n\n"
+                            "On Windows you can enable OCR to read those pages:\n"
+                            "pip install winocr"),
+                     "es": ("{0} de {1} páginas no contienen texto seleccionable (escaneo o "
+                            "diseño aplanado), así que no hay nada que extraer de ellas.\n\n"
+                            "En Windows puedes activar OCR para leerlas:\n"
+                            "pip install winocr")},
     "status_small": {"en": "Selection too small — ignored",
                      "es": "Selección demasiado pequeña — ignorada"},
     "status_loaded_csv": {"en": "Loaded {0} labels from {1}",

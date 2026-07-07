@@ -15,6 +15,16 @@ PRICE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A line that is nothing but a plausible amount (catalogs often print the
+# price as a bare number next to a currency *icon* the text layer can't see):
+# "799" · "1,079" · "199.90". 5+ digit integers are treated as IDs, not prices.
+STANDALONE_PRICE_RE = re.compile(
+    r"^[\W_]*(\d{1,3}(?:,\d{3})+(?:\.\d{2})?|\d{3,4}(?:\.\d{2})?|\d+[.,]\d{2})[\W_]*$"
+)
+
+# Product-code-looking token on its own line: "126031", "*126033L", "W2155".
+ID_RE = re.compile(r"^[\W_]*((?:[A-Za-z]{1,2}\d{3,7}|\d{5,7})[Ll]?)[\W_]*$")
+
 MIN_LABEL_LEN = 2
 
 
@@ -22,15 +32,35 @@ def _clean(text):
     return re.sub(r"\s+", " ", text).strip()
 
 
+def parse_id(text):
+    """Return a product-code-looking token if the line is just that, else None."""
+    m = ID_RE.match(text)
+    return m.group(1) if m else None
+
+
 def parse_price(text):
-    """Return a float price if ``text`` contains a currency amount, else None."""
+    """Return a float price from a currency amount or a standalone number."""
     m = PRICE_RE.search(text)
-    if not m:
-        return None
-    raw = m.group("a") or m.group("b") or ""
-    raw = raw.strip()
+    standalone = False
+    if m:
+        raw = (m.group("a") or m.group("b") or "").strip()
+    else:
+        if parse_id(text):  # bare codes are IDs, not prices
+            return None
+        sm = STANDALONE_PRICE_RE.match(text)
+        if not sm:
+            return None
+        raw = sm.group(1)
+        standalone = True
     if not raw:
         return None
+    if standalone:
+        # Bare integers that are probably not prices: zeros (OCR artifacts
+        # like "0000") and year-looking values ("2023" on a cover).
+        if re.fullmatch(r"\d{3,4}", raw):
+            v = int(raw)
+            if v == 0 or 1900 <= v <= 2100:
+                return None
     # Normalize thousands/decimal separators to a plain float.
     if "," in raw and "." in raw:
         # Whichever comes last is the decimal separator.
@@ -75,6 +105,7 @@ def extract_page_text(doc, progress_cb=None):
                     },
                     "is_price": price is not None,
                     "price": price,
+                    "id": parse_id(text),
                 })
         result[pno + 1] = items
         if progress_cb:
@@ -82,8 +113,9 @@ def extract_page_text(doc, progress_cb=None):
     return result
 
 
-def _price_near(item, prices, band=0.06):
-    """Return a price value sitting on roughly the same row as ``item``."""
+def _price_near(item, prices, band=0.09):
+    """Return a price on the same row as ``item`` or stacked just below it
+    (catalogs print the price either beside or under the product name)."""
     b = item["bbox_norm"]
     cy = (b["y0"] + b["y1"]) / 2
     best = None
@@ -92,7 +124,9 @@ def _price_near(item, prices, band=0.06):
         pb = p["bbox_norm"]
         pcy = (pb["y0"] + pb["y1"]) / 2
         dy = abs(pcy - cy)
-        # Same visual row and horizontally not too far apart.
+        if pcy < cy - 0.02:  # ignore prices clearly above the name
+            continue
+        # Horizontally same column-ish (overlap, or a small gap).
         if dy <= best_dy and min(b["x1"], pb["x1"]) > max(b["x0"], pb["x0"]) - 0.2:
             best = p["price"]
             best_dy = dy
@@ -160,18 +194,29 @@ def _x_overlaps(a, b):
     return min(a["x1"], b["x1"]) > max(a["x0"], b["x0"])
 
 
+def suggest_from_items(items):
+    """Build a {label, price, id, candidates} suggestion from text items."""
+    if not items:
+        return {"label": None, "price": None, "id": None, "candidates": []}
+    names = [it for it in items if not it["is_price"] and not it.get("id")]
+    price = next((it["price"] for it in items if it["is_price"]), None)
+    cid = next((it.get("id") for it in items if it.get("id")), None)
+    # Best name = longest non-price, non-code line (usually the title).
+    label = max(names, key=lambda it: len(it["text"]))["text"] if names else None
+    return {"label": label, "price": price, "id": cid,
+            "candidates": [it["text"] for it in items]}
+
+
 def find_label_for_crop(page_items, crop, below_gap=0.06):
-    """Suggest a label + price for a crop rectangle (normalized coords).
+    """Suggest label/price/id for a crop rectangle (normalized coords).
 
     Prefers text lines that fall *inside* the crop; if none, looks at lines
-    immediately *below* it (a caption under a photo). Returns
-    ``{"label": str|None, "price": float|None, "candidates": [str, ...]}``.
+    immediately *below* it (a caption under a photo).
     """
     if not page_items:
-        return {"label": None, "price": None, "candidates": []}
+        return suggest_from_items([])
 
-    inside = [it for it in page_items if _overlap(it["bbox_norm"], crop) > 0]
-    chosen = inside
+    chosen = [it for it in page_items if _overlap(it["bbox_norm"], crop) > 0]
     if not chosen:
         below = []
         for it in page_items:
@@ -182,12 +227,4 @@ def find_label_for_crop(page_items, crop, below_gap=0.06):
         below.sort(key=lambda it: it["bbox_norm"]["y0"])
         chosen = below
 
-    if not chosen:
-        return {"label": None, "price": None, "candidates": []}
-
-    names = [it for it in chosen if not it["is_price"]]
-    price = next((it["price"] for it in chosen if it["is_price"]), None)
-    # Best name = longest non-price line (usually the product/figure title).
-    label = max(names, key=lambda it: len(it["text"]))["text"] if names else None
-    candidates = [it["text"] for it in chosen]
-    return {"label": label, "price": price, "candidates": candidates}
+    return suggest_from_items(chosen)

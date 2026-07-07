@@ -6,4 +6,4 @@ automatic extractors get wrong (bad crops, merged images, missing bleed) you
 fix by hand in seconds.
 """
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"

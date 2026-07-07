@@ -1,2 +1,5 @@
 pymupdf>=1.23
 pillow>=10.0
+# Optional OCR fallback for PDFs with no text layer (uses the OCR built into
+# Windows 10/11 — no cloud, no extra downloads):
+winocr; platform_system == "Windows"

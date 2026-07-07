@@ -27,6 +27,10 @@ auto-fill from the page text → **Save**.*
   your selection. No CSV, no retyping.
 - 🎯 **Key info only** — toggle "Only items with a price" to keep real
   products/entries and drop greetings, headers and stray numbers.
+- 🔎 **OCR fallback (Windows)** — scanned or flattened PDFs with no text layer
+  are read with the OCR built into Windows 10/11: whole pages during
+  **Extract data**, and the exact crop region when you make a crop. Product
+  codes (`126031`, `W2155`) are detected and pre-fill the ID field.
 - 🗄️ **Export to SQL** — one click writes a ready-to-load `.sql` (id, label,
   price, category, page, image path) for all your crops.
 - 🌐 **English & Spanish** — switch the whole UI language from the top-right;
@@ -119,9 +123,26 @@ on, when you drag a crop:
 - if a nearby line looks like a **price** (`$`, `€`, `MXN`, …), it's parsed and
   filled into the price field too.
 
-It works on any PDF with a real text layer (not a flat scan). The scan is cached
-next to your crops as `extracted.json`, so reopening the same PDF is instant. You
-can still edit any field before saving — nothing is forced.
+The scan is cached next to your crops as `extracted.json`, so reopening the
+same PDF is instant. You can still edit any field before saving — nothing is
+forced.
+
+#### What about scanned PDFs with no text layer?
+
+Lots of catalogs are just images inside a PDF — there is no text to extract.
+On **Windows 10/11**, PDF Crop Studio falls back to the OCR engine built into
+the OS (installed with `pip install winocr`, no cloud involved):
+
+- **Extract data** OCRs every page that has no text layer (you'll see the
+  progress in the status bar).
+- When you **drag a crop** on such a page, the app OCRs just your selection
+  plus the caption area below it — small region, much higher accuracy — and
+  pre-fills the label, price and even the product code into the ID field.
+- Common OCR digit mistakes in prices are fixed automatically
+  (`$ I,839.OO` → `$1,839.00`).
+
+Heads-up: OCR quality depends on the source. Crisp digital PDFs read great;
+low-resolution scans may only be partially readable.
 
 ### Export to SQL
 

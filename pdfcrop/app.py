@@ -2,13 +2,16 @@
 import json
 import os
 import re
+import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
 from PIL import Image, ImageTk
 
+from . import ocr
 from .dialog import CropDialog
-from .extract import build_label_list, extract_page_text, find_label_for_crop
+from .extract import (build_label_list, extract_page_text, find_label_for_crop,
+                      suggest_from_items)
 from .i18n import LANGUAGES, get_lang, set_lang, t
 from .labels import load_labels
 from .pdfdoc import PdfDocument
@@ -391,6 +394,55 @@ class ExtractorApp:
             messagebox.showerror(t("mb_extract_err"), str(e))
             return
 
+        empty_pages = [p for p, items in self.page_text.items() if not items]
+        if empty_pages and ocr.available():
+            self._ocr_pages_async(empty_pages)
+            return
+        if empty_pages and len(empty_pages) == self._page_count():
+            messagebox.showwarning(t("mb_no_text_t"),
+                                   t("mb_no_text_m").format(len(empty_pages), self._page_count()))
+        self._finish_extract(ocr_pages=0)
+
+    def _ocr_pages_async(self, pages):
+        """OCR pages that have no text layer, in a background thread."""
+        doc = self.doc
+        total = len(pages)
+        langs = (get_lang(), "en" if get_lang() == "es" else "es")
+        self._set_status(t("status_ocr_page").format(total, 0))
+
+        def worker():
+            # Own document handle: PyMuPDF isn't thread-safe and the user may
+            # keep navigating pages (rendering) while we OCR.
+            results = {}
+            try:
+                ocr_doc = PdfDocument(doc.path, render_zoom=RENDER_ZOOM)
+            except Exception:
+                ocr_doc = None
+            for i, p in enumerate(pages, 1):
+                self.root.after(0, lambda i=i: self._set_status(
+                    t("status_ocr_page").format(total, i)))
+                try:
+                    img = ocr_doc.render(p - 1) if ocr_doc else None
+                    results[p] = ocr.ocr_image(img, langs) if img else []
+                except Exception:
+                    results[p] = []
+            if ocr_doc:
+                ocr_doc.close()
+            self.root.after(0, lambda: self._on_ocr_done(doc, results))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_ocr_done(self, doc, results):
+        if doc is not self.doc:
+            return  # the user opened another PDF while OCR was running
+        ocr_pages = 0
+        for p, items in results.items():
+            if items:
+                self.page_text[p] = items
+                ocr_pages += 1
+        self._finish_extract(ocr_pages=ocr_pages)
+
+    def _finish_extract(self, ocr_pages=0):
         self.label_index = {}
         self._rebuild_labels()
         n_prices = sum(1 for v in self.page_text.values() for it in v if it["is_price"])
@@ -401,7 +453,10 @@ class ExtractorApp:
         except OSError:
             pass
 
-        self._set_status(t("status_extracted").format(len(self.labels), n_prices))
+        status = t("status_extracted").format(len(self.labels), n_prices)
+        if ocr_pages:
+            status += t("status_extracted_ocr").format(ocr_pages)
+        self._set_status(status)
 
     def _rebuild_labels(self):
         """Rebuild the sidebar label list from the extracted text (respects the
@@ -788,11 +843,18 @@ class ExtractorApp:
             "x0": ix0 / self.img_w, "y0": iy0 / self.img_h,
             "x1": ix1 / self.img_w, "y1": iy1 / self.img_h,
         }
-        suggestion = find_label_for_crop(self.page_text.get(page, []), crop_norm)
+        page_items = self.page_text.get(page, [])
+        if page_items:
+            suggestion = find_label_for_crop(page_items, crop_norm)
+        else:
+            # No text layer on this page: OCR just the crop plus the caption
+            # band below it (small region = far better OCR accuracy).
+            suggestion = self._ocr_crop_region(ix0, iy0, ix1, iy1)
 
         dlg = CropDialog(self.root, crop, self, page, (ix0, iy0, ix1, iy1),
                          suggested_label=suggestion["label"],
-                         suggested_price=suggestion["price"])
+                         suggested_price=suggestion["price"],
+                         suggested_id=suggestion.get("id"))
         self.root.wait_window(dlg)
         if dlg.result:
             key = dlg.result
@@ -802,6 +864,20 @@ class ExtractorApp:
             self._show_thumb(key)
             self.pending_id = self.pending_label = None
             self.sel_lbl.config(text="")
+
+    def _ocr_crop_region(self, ix0, iy0, ix1, iy1):
+        """OCR the crop + a band below it (where captions/prices usually sit)."""
+        if not ocr.available() or self.orig is None:
+            return suggest_from_items([])
+        band = int((iy1 - iy0) * 0.6)
+        margin = int((ix1 - ix0) * 0.15)
+        rx0 = max(0, ix0 - margin)
+        ry0 = max(0, iy0)
+        rx1 = min(self.img_w, ix1 + margin)
+        ry1 = min(self.img_h, iy1 + band)
+        region = self.orig.crop((rx0, ry0, rx1, ry1))
+        langs = (get_lang(), "en" if get_lang() == "es" else "es")
+        return suggest_from_items(ocr.ocr_image(region, langs))
 
     def _show_thumb(self, key):
         try:
