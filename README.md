@@ -12,10 +12,10 @@ select is what you get.
 Built for catalogs, magazines, datasheets, zines, scanned docs — any PDF where
 you need clean image cutouts and the automatic tools keep failing you.
 
-![screenshot](docs/screenshot.png)
-<!-- Replace docs/screenshot.png with a real screenshot or an animated GIF of a
-     crop being made. A short GIF on the README is the single biggest driver of
-     GitHub stars. -->
+![PDF Crop Studio in action](docs/demo.gif)
+
+*Open a PDF → **Extract data** → drag over a product → the label and price
+auto-fill from the page text → **Save**.*
 
 ## Features
 
